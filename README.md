@@ -100,7 +100,7 @@ cloud-controller/
 
 ```powershell
 # In PowerShell:
-$env:PYTHONPATH = "C:\Users\om\.gemini\antigravity\scratch\cloud-controller"
+$env:PYTHONPATH = "C:\Users\<system name>\.gemini\antigravity\scratch\cloud-controller"
 python -m cloud_controller
 ```
 
@@ -127,7 +127,7 @@ Use the top-right **Switch User** bar to instantly switch between **Alice (Genom
 Researchers can interact directly with the controller from laboratory terminal workstations:
 
 ```powershell
-$env:PYTHONPATH = "C:\Users\om\.gemini\antigravity\scratch\cloud-controller"
+$env:PYTHONPATH = "C:\Users\<system name>\.gemini\antigravity\scratch\cloud-controller"
 
 # 1. Login
 python -m cloud_controller.cli login -u alice -p labpassword123
@@ -161,7 +161,7 @@ python -m cloud_controller.cli publish fil_abc123456789 --provider s3
 Run all tests via pytest:
 
 ```powershell
-$env:PYTHONPATH = "C:\Users\om\.gemini\antigravity\scratch\cloud-controller"
+$env:PYTHONPATH = "C:\Users\<system name>\.gemini\antigravity\scratch\cloud-controller"
 pytest tests -v
 ```
 
