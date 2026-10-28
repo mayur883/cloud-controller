@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lab Cloud Controller | Multi-Tenant LAN Storage & HDFS</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdfa',
+              100: '#ccfbf1',
+              500: '#14b8a6',
+              600: '#0d9488',
+              700: '#0f766e',
+              900: '#134e4a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .glass-card {
+      background: rgba(30, 41, 59, 0.7);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .progress-bar-transition {
+      transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans antialiased selection:bg-teal-500 selection:text-white">
+
+  <!-- Top Navigation Bar -->
+  <header class="border-b border-slate-800 bg-slate-900/80 sticky top-0 z-40 backdrop-blur-md">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      
+      <!-- Brand & Title -->
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-teal-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-teal-500/20">
+          <svg class="w-5 h-5 text-slate-950 font-bold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 00-9.78 2.096A4.001 4.001 0 003 15z" />
+          </svg>
+        </div>
+        <div>
+          <span class="font-bold text-lg tracking-tight bg-gradient-to-r from-teal-400 to-cyan-200 bg-clip-text text-transparent">Lab Cloud Controller</span>
+          <span class="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-300 border border-teal-500/20">LAN HDFS Edition</span>
+        </div>
+      </div>
+
+      <!-- User & Tenant Profile Switcher -->
+      <div class="flex items-center space-x-4">
+        <!-- Quick Switch Account -->
+        <div class="flex items-center space-x-1.5 text-xs bg-slate-800/80 p-1 rounded-lg border border-slate-700">
+          <span class="text-slate-400 px-2 font-medium">Switch User:</span>
+          <button onclick="switchUser('alice', 'labpassword123')" class="px-2.5 py-1 rounded hover:bg-slate-700 text-teal-300 font-medium transition" title="Genomics Core Admin">Alice (Genomics)</button>
+          <button onclick="switchUser('bob', 'labpassword123')" class="px-2.5 py-1 rounded hover:bg-slate-700 text-slate-300 transition" title="Genomics Core Researcher">Bob</button>
+          <button onclick="switchUser('charlie', 'labpassword123')" class="px-2.5 py-1 rounded hover:bg-slate-700 text-cyan-300 transition" title="Quantum Optics Researcher">Charlie (Quantum)</button>
+          <button onclick="switchUser('superadmin', 'labadmin2026')" class="px-2.5 py-1 rounded hover:bg-slate-700 text-amber-300 transition" title="Global Superadmin">Admin</button>
+        </div>
+
+        <!-- Current User Info Badge -->
+        <div class="flex items-center space-x-2 border-l border-slate-700 pl-4">
+          <div class="w-8 h-8 rounded-full bg-slate-800 border border-teal-500/40 flex items-center justify-center text-teal-400 font-bold text-sm" id="userAvatar">A</div>
+          <div class="text-xs">
+            <div class="font-semibold text-slate-200" id="userNameLabel">Loading...</div>
+            <div class="text-slate-400 text-[11px]" id="userRoleTenantLabel">...</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full space-y-6">
+
+    <!-- Quota & Storage Analytics Banner -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      
+      <!-- User Quota Card -->
+      <div class="glass-card rounded-xl p-5 shadow-lg border border-slate-800/80">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">My Storage Quota</span>
+          <span class="text-xs font-bold text-teal-400" id="userQuotaPct">0%</span>
+        </div>
+        <div class="flex items-baseline space-x-2">
+          <span class="text-2xl font-extrabold text-white" id="userUsedMB">0.0</span>
+          <span class="text-xs text-slate-400">/ <span id="userTotalMB">0.0</span> MB</span>
+        </div>
+        <div class="w-full bg-slate-800 rounded-full h-2 mt-3 overflow-hidden">
+          <div class="bg-teal-500 h-2 rounded-full progress-bar-transition" id="userQuotaBar" style="width: 0%"></div>
+        </div>
+        <div class="mt-2 text-[11px] text-slate-400 flex justify-between">
+          <span id="userFilesCount">0 files stored</span>
+          <span id="userFreeMB">0 MB free</span>
+        </div>
+      </div>
+
+      <!-- Tenant Quota Card -->
+      <div class="glass-card rounded-xl p-5 shadow-lg border border-slate-800/80">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tenant Org Quota</span>
+          <span class="text-xs font-bold text-cyan-400" id="tenantQuotaPct">0%</span>
+        </div>
+        <div class="flex items-baseline space-x-2">
+          <span class="text-2xl font-extrabold text-white" id="tenantUsedMB">0.0</span>
+          <span class="text-xs text-slate-400">/ <span id="tenantTotalMB">0.0</span> MB</span>
+        </div>
+        <div class="w-full bg-slate-800 rounded-full h-2 mt-3 overflow-hidden">
+          <div class="bg-cyan-500 h-2 rounded-full progress-bar-transition" id="tenantQuotaBar" style="width: 0%"></div>
+        </div>
+        <div class="mt-2 text-[11px] text-slate-400 flex justify-between">
+          <span id="tenantNameDisplay">Org: ...</span>
+          <span id="tenantFreeMB">0 MB free</span>
+        </div>
+      </div>
+
+      <!-- HDFS Cluster Status Card -->
+      <div class="glass-card rounded-xl p-5 shadow-lg border border-slate-800/80 flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Apache HDFS Cluster</span>
+            <span class="flex items-center space-x-1.5">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" id="clusterStatusDot"></span>
+              <span class="text-xs font-bold text-emerald-400" id="clusterStatusText">HEALTHY</span>
+            </span>
+          </div>
+          <div class="flex items-baseline space-x-2">
+            <span class="text-2xl font-extrabold text-white" id="clusterTotalNodes">3</span>
+            <span class="text-xs text-slate-400">DataNodes Active</span>
+          </div>
+        </div>
+        <div class="pt-2 border-t border-slate-800/60 flex items-center justify-between text-xs text-slate-400">
+          <span>Replica Policy: <strong class="text-slate-200">2x Rack-Aware</strong></span>
+          <span>Security: <strong class="text-teal-300">AES-256-GCM</strong></span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="flex border-b border-slate-800 space-x-6 text-sm font-medium">
+      <button onclick="setTab('files')" id="tabBtn-files" class="pb-3 border-b-2 border-teal-500 text-teal-400 flex items-center space-x-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2 1 3 3 3h10c2 0 3-1 3-3V7c0-2-1-3-3-3H7C5 4 4 5 4 7z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-6h6v6"/></svg>
+        <span>File Storage & Segmentation</span>
+      </button>
+      <button onclick="setTab('hdfs')" id="tabBtn-hdfs" class="pb-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+        <span>HDFS DataNodes & Topology</span>
+      </button>
+      <button onclick="setTab('hybrid')" id="tabBtn-hybrid" class="pb-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 00-9.78 2.096A4.001 4.001 0 003 15z"/></svg>
+        <span>Hybrid Cloud (S3/GCS + CDN)</span>
+      </button>
+      <button onclick="setTab('api')" id="tabBtn-api" class="pb-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+        <span>REST API & CLI Guide</span>
+      </button>
+    </div>
+
+    <!-- TAB 1: FILE STORAGE & SEGMENTATION -->
+    <div id="tabContent-files" class="space-y-6">
+      
+      <!-- Upload Card -->
+      <div class="glass-card rounded-xl p-5 border border-slate-800">
+        <h3 class="text-sm font-semibold text-slate-300 mb-3 flex items-center space-x-2">
+          <svg class="w-4 h-4 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+          <span>Upload File to Laboratory Storage</span>
+        </h3>
+
+        <form id="uploadForm" onsubmit="handleUpload(event)" class="space-y-4">
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+            
+            <!-- File Input -->
+            <div class="md:col-span-2">
+              <label class="block text-xs font-medium text-slate-400 mb-1">Select File</label>
+              <input type="file" id="fileInput" required class="block w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-teal-500/10 file:text-teal-400 hover:file:bg-teal-500/20 bg-slate-900 border border-slate-700 rounded-lg cursor-pointer focus:outline-none" />
+            </div>
+
+            <!-- Configurable Block Size -->
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Segment Block Size</label>
+              <select id="blockSizeSelect" class="w-full text-xs bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-slate-200 focus:border-teal-500 focus:outline-none">
+                <option value="65536">64 KB (Micro-blocks)</option>
+                <option value="262144">256 KB</option>
+                <option value="524288">512 KB</option>
+                <option value="1048576" selected>1 MB (Default Standard)</option>
+                <option value="2097152">2 MB</option>
+                <option value="4194304">4 MB</option>
+              </select>
+            </div>
+
+            <!-- AES-256-GCM Encryption Toggle -->
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Confidentiality</label>
+              <div class="flex items-center space-x-2 bg-slate-900 border border-slate-700 rounded-lg py-1.5 px-3">
+                <input type="checkbox" id="encryptCheckbox" checked class="w-4 h-4 text-teal-600 rounded bg-slate-800 border-slate-700 focus:ring-teal-500" />
+                <label for="encryptCheckbox" class="text-xs text-slate-300 font-medium cursor-pointer">AES-256-GCM</label>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="flex justify-between items-center pt-2">
+            <span class="text-[11px] text-slate-400">
+              Files are automatically divided into discrete blocks, encrypted with per-tenant derived keys, and placed across HDFS DataNodes.
+            </span>
+            <button type="submit" id="uploadBtn" class="bg-teal-600 hover:bg-teal-500 text-white font-semibold text-xs py-2.5 px-5 rounded-lg shadow-lg shadow-teal-600/30 transition flex items-center space-x-2">
+              <span>Segment & Upload</span>
+            </button>
+          </div>
+        </form>
+
+        <!-- Upload Status Banner -->
+        <div id="uploadStatusMsg" class="hidden mt-3 p-3 rounded-lg text-xs font-medium"></div>
+      </div>
+
+      <!-- File List Table -->
+      <div class="glass-card rounded-xl border border-slate-800 overflow-hidden">
+        <div class="p-4 border-b border-slate-800 flex justify-between items-center">
+          <h3 class="text-sm font-semibold text-slate-200">Tenant Files in Storage</h3>
+          <button onclick="loadFiles()" class="text-xs text-teal-400 hover:text-teal-300 flex items-center space-x-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            <span>Refresh</span>
+          </button>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-900/80 text-slate-400 uppercase font-semibold text-[10px] tracking-wider border-b border-slate-800">
+              <tr>
+                <th class="py-3 px-4">Filename</th>
+                <th class="py-3 px-4">Size</th>
+                <th class="py-3 px-4">HDFS Blocks</th>
+                <th class="py-3 px-4">Security / Cipher</th>
+                <th class="py-3 px-4">Checksum (SHA-256)</th>
+                <th class="py-3 px-4">Uploader</th>
+                <th class="py-3 px-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="filesTableBody" class="divide-y divide-slate-800/60 font-mono">
+              <tr>
+                <td colspan="7" class="py-8 text-center text-slate-500 font-sans">Loading files...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- TAB 2: HDFS CLUSTER & DATANODES -->
+    <div id="tabContent-hdfs" class="hidden space-y-6">
+      
+      <div class="glass-card rounded-xl p-5 border border-slate-800">
+        <div class="flex justify-between items-center mb-4">
+          <div>
+            <h3 class="text-sm font-semibold text-slate-200">Apache HDFS Distributed Storage Topology</h3>
+            <p class="text-xs text-slate-400 mt-0.5">Fault-tolerant multi-node block replication across laboratory LAN racks</p>
+          </div>
+          <button onclick="loadClusterStatus()" class="text-xs text-teal-400 hover:text-teal-300">Refresh Topology</button>
+        </div>
+
+        <!-- DataNode Cards Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="datanodesContainer">
+          <!-- Populated by JS -->
+        </div>
+
+        <div class="mt-6 p-4 rounded-lg bg-slate-900/90 border border-slate-800 text-xs space-y-2">
+          <div class="font-semibold text-slate-300 flex items-center space-x-2">
+            <span class="w-2 h-2 rounded-full bg-teal-400"></span>
+            <span>Rack-Aware Fault Tolerance & Self-Healing Architecture</span>
+          </div>
+          <p class="text-slate-400 leading-relaxed font-sans">
+            Files segmented by the controller are distributed using a <strong>2x Rack-Aware placement strategy</strong>:
+            the primary block replica is placed on <em>Rack 1</em> and its redundant replica is assigned to <em>Rack 2</em>.
+            You can simulate network or hardware failure by toggling any DataNode offline using the controls above. The controller
+            will seamlessly fail over to the secondary healthy replica during file download with zero interruption.
+          </p>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- TAB 3: HYBRID CLOUD PUBLISHING -->
+    <div id="tabContent-hybrid" class="hidden space-y-6">
+      
+      <div class="glass-card rounded-xl p-5 border border-slate-800">
+        <div class="flex justify-between items-center mb-4">
+          <div>
+            <h3 class="text-sm font-semibold text-slate-200">Global Hybrid Cloud Publications (S3 / GCS + CDN)</h3>
+            <p class="text-xs text-slate-400 mt-0.5">Export selected project documentation and research summaries to public object storage</p>
+          </div>
+          <button onclick="loadPublishedDocs()" class="text-xs text-teal-400 hover:text-teal-300">Refresh List</button>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-900/80 text-slate-400 uppercase font-semibold text-[10px] tracking-wider border-b border-slate-800">
+              <tr>
+                <th class="py-3 px-4">Document</th>
+                <th class="py-3 px-4">Cloud Provider</th>
+                <th class="py-3 px-4">Public Cloud Object Key</th>
+                <th class="py-3 px-4">Global CDN Edge Delivery URL</th>
+                <th class="py-3 px-4 text-right">Preview</th>
+              </tr>
+            </thead>
+            <tbody id="publishedTableBody" class="divide-y divide-slate-800/60 font-mono">
+              <tr>
+                <td colspan="5" class="py-8 text-center text-slate-500 font-sans">No documents published yet. Publish a document from the File Storage tab!</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- TAB 4: REST API & CLI -->
+    <div id="tabContent-api" class="hidden space-y-6">
+      <div class="glass-card rounded-xl p-6 border border-slate-800 space-y-6 text-xs text-slate-300">
+        <div>
+          <h3 class="text-sm font-bold text-slate-100 mb-1">Laboratory LAN REST API & CLI Integration</h3>
+          <p class="text-slate-400">Interact with the Cloud Controller programmatically from Python, shell scripts, or laboratory workstations.</p>
+        </div>
+
+        <div class="space-y-4 font-mono">
+          <div>
+            <div class="text-slate-400 font-sans font-semibold mb-1">1. Authenticate & Obtain JWT Token</div>
+            <pre class="bg-slate-950 p-3 rounded-lg border border-slate-800 text-teal-300 overflow-x-auto">curl -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "alice", "password": "labpassword123"}'</pre>
+          </div>
+
+          <div>
+            <div class="text-slate-400 font-sans font-semibold mb-1">2. Upload & Segment File with AES-256-GCM</div>
+            <pre class="bg-slate-950 p-3 rounded-lg border border-slate-800 text-teal-300 overflow-x-auto">curl -X POST http://localhost:8080/api/v1/files/upload \
+  -H "Authorization: Bearer &lt;TOKEN&gt;" \
+  -F "file=@experiment_data.csv" \
+  -F "block_size=1048576" \
+  -F "encrypt=true"</pre>
+          </div>
+
+          <div>
+            <div class="text-slate-400 font-sans font-semibold mb-1">3. Download with Transparent Reassembly & Decryption</div>
+            <pre class="bg-slate-950 p-3 rounded-lg border border-slate-800 text-teal-300 overflow-x-auto">curl -X GET http://localhost:8080/api/v1/files/&lt;FILE_ID&gt;/download \
+  -H "Authorization: Bearer &lt;TOKEN&gt;" \
+  -o restored_experiment_data.csv</pre>
+          </div>
+
+          <div>
+            <div class="text-slate-400 font-sans font-semibold mb-1">4. Inspect Distributed HDFS Block Segments</div>
+            <pre class="bg-slate-950 p-3 rounded-lg border border-slate-800 text-teal-300 overflow-x-auto">curl -X GET http://localhost:8080/api/v1/files/&lt;FILE_ID&gt;/blocks \
+  -H "Authorization: Bearer &lt;TOKEN&gt;"</pre>
+          </div>
+        </div>
+
+        <div class="pt-4 border-t border-slate-800 flex items-center space-x-4">
+          <a href="/docs" target="_blank" class="bg-slate-800 hover:bg-slate-700 text-teal-400 px-4 py-2 rounded-lg font-semibold inline-flex items-center space-x-2 transition">
+            <span>Open Swagger Interactive Docs</span>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+          </a>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Block Inspector Modal -->
+  <div id="blockModal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="glass-card bg-slate-900 border border-slate-700 rounded-xl max-w-3xl w-full p-6 shadow-2xl space-y-4 max-h-[85vh] flex flex-col">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+        <div>
+          <h3 class="text-sm font-bold text-white flex items-center space-x-2">
+            <svg class="w-4 h-4 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+            <span id="modalFileTitle">Block Segments Inspector</span>
+          </h3>
+          <p class="text-[11px] text-slate-400" id="modalFileSubtitle">Detailed breakdown of HDFS segment distribution and SHA-256 integrity</p>
+        </div>
+        <button onclick="closeBlockModal()" class="text-slate-400 hover:text-white text-lg font-bold">&times;</button>
+      </div>
+
+      <div class="overflow-y-auto flex-1">
+        <table class="w-full text-left text-xs text-slate-300 font-mono">
+          <thead class="bg-slate-950 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+            <tr>
+              <th class="py-2.5 px-3">Idx</th>
+              <th class="py-2.5 px-3">Block ID</th>
+              <th class="py-2.5 px-3">Raw Size</th>
+              <th class="py-2.5 px-3">Encrypted</th>
+              <th class="py-2.5 px-3">Block SHA-256</th>
+              <th class="py-2.5 px-3">HDFS DataNode Replicas</th>
+            </tr>
+          </thead>
+          <tbody id="modalBlocksTableBody" class="divide-y divide-slate-800">
+            <!-- Populated via JS -->
+          </tbody>
+        </table>
+      </div>
+
+      <div class="border-t border-slate-800 pt-3 flex justify-end">
+        <button onclick="closeBlockModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Publish Modal -->
+  <div id="publishModal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="glass-card bg-slate-900 border border-slate-700 rounded-xl max-w-md w-full p-6 shadow-2xl space-y-4">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+        <h3 class="text-sm font-bold text-white">Publish Document to Cloud Object Storage</h3>
+        <button onclick="closePublishModal()" class="text-slate-400 hover:text-white">&times;</button>
+      </div>
+
+      <p class="text-xs text-slate-300">
+        Publishing reassembles the file from HDFS and publishes it to public object storage with an edge-cached CDN URL for external collaborators.
+      </p>
+
+      <input type="hidden" id="publishFileId" />
+      <div>
+        <label class="block text-xs font-semibold text-slate-400 mb-1">Target Cloud Provider</label>
+        <select id="publishProvider" class="w-full bg-slate-950 border border-slate-700 text-xs rounded-lg p-2.5 text-slate-200">
+          <option value="s3">Amazon Web Services (AWS S3) + CloudFront CDN</option>
+          <option value="gcs">Google Cloud Storage (GCS) + Google Cloud CDN</option>
+        </select>
+      </div>
+
+      <div class="flex justify-end space-x-2 pt-2">
+        <button onclick="closePublishModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg">Cancel</button>
+        <button onclick="confirmPublish()" id="confirmPublishBtn" class="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white text-xs rounded-lg font-semibold">Publish & Generate CDN</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Application Logic -->
+  <script>
+    let currentAuthToken = localStorage.getItem("token") || "";
+    let currentUser = null;
+
+    // Helper: format bytes to readable string
+    function formatBytes(bytes) {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    // Tab Switching
+    function setTab(tabName) {
+      ['files', 'hdfs', 'hybrid', 'api'].forEach(t => {
+        const btn = document.getElementById(`tabBtn-${t}`);
+        const content = document.getElementById(`tabContent-${t}`);
+        if (t === tabName) {
+          btn.className = "pb-3 border-b-2 border-teal-500 text-teal-400 flex items-center space-x-2";
+          content.classList.remove('hidden');
+        } else {
+          btn.className = "pb-3 border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center space-x-2";
+          content.classList.add('hidden');
+        }
+      });
+      if (tabName === 'hdfs') loadClusterStatus();
+      if (tabName === 'hybrid') loadPublishedDocs();
+    }
+
+    // Authentication & User Switching
+    async function switchUser(username, password) {
+      try {
+        const res = await fetch('/api/v1/auth/login', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ username, password })
+        });
+        if (!res.ok) throw new Error('Login failed');
+        const data = await res.json();
+        currentAuthToken = data.access_token;
+        localStorage.setItem("token", currentAuthToken);
+        await initDashboard();
+      } catch (err) {
+        alert('Authentication error: ' + err.message);
+      }
+    }
+
+    async function authFetch(url, options = {}) {
+      if (!options.headers) options.headers = {};
+      if (currentAuthToken) {
+        options.headers['Authorization'] = `Bearer ${currentAuthToken}`;
+      }
+      return fetch(url, options);
+    }
+
+    // Initialize Dashboard
+    async function initDashboard() {
+      if (!currentAuthToken) {
+        await switchUser('alice', 'labpassword123');
+        return;
+      }
+      try {
+        const res = await authFetch('/api/v1/auth/me');
+        if (res.status === 401) {
+          await switchUser('alice', 'labpassword123');
+          return;
+        }
+        const data = await res.json();
+        currentUser = data.user;
+        updateUserUI(data);
+        await loadFiles();
+        await loadClusterStatus();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function updateUserUI(data) {
+      const u = data.user;
+      const q = data.quota;
+
+      document.getElementById('userAvatar').innerText = u.username.charAt(0).toUpperCase();
+      document.getElementById('userNameLabel').innerText = u.username;
+      document.getElementById('userRoleTenantLabel').innerText = `${u.role.toUpperCase()} • ${q.tenant.name}`;
+
+      // User Quota
+      document.getElementById('userQuotaPct').innerText = `${q.user.usage_pct}%`;
+      document.getElementById('userUsedMB').innerText = q.user.used_mb;
+      document.getElementById('userTotalMB').innerText = q.user.quota_mb;
+      document.getElementById('userQuotaBar').style.width = `${Math.min(100, q.user.usage_pct)}%`;
+      document.getElementById('userFilesCount').innerText = `${q.user.files_count} files stored`;
+      document.getElementById('userFreeMB').innerText = `${roundMb(q.user.free_bytes)} MB free`;
+
+      // Tenant Quota
+      document.getElementById('tenantQuotaPct').innerText = `${q.tenant.usage_pct}%`;
+      document.getElementById('tenantUsedMB').innerText = q.tenant.used_mb;
+      document.getElementById('tenantTotalMB').innerText = q.tenant.quota_mb;
+      document.getElementById('tenantQuotaBar').style.width = `${Math.min(100, q.tenant.usage_pct)}%`;
+      document.getElementById('tenantNameDisplay').innerText = `Org: ${q.tenant.name}`;
+      document.getElementById('tenantFreeMB').innerText = `${roundMb(q.tenant.free_bytes)} MB free`;
+    }
+
+    function roundMb(b) {
+      return (b / (1024 * 1024)).toFixed(2);
+    }
+
+    // Load Files
+    async function loadFiles() {
+      try {
+        const res = await authFetch('/api/v1/files');
+        const data = await res.json();
+        const tbody = document.getElementById('filesTableBody');
+        tbody.innerHTML = '';
+
+        if (!data.files || data.files.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-slate-500 font-sans">No files uploaded yet in this tenant. Upload a file above!</td></tr>`;
+          return;
+        }
+
+        data.files.forEach(f => {
+          const tr = document.createElement('tr');
+          tr.className = "hover:bg-slate-800/40 transition";
+          tr.innerHTML = `
+            <td class="py-3 px-4 font-semibold text-slate-100 flex items-center space-x-2">
+              <svg class="w-4 h-4 text-teal-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+              <span class="truncate max-w-[200px]" title="${f.filename}">${f.filename}</span>
+            </td>
+            <td class="py-3 px-4 text-slate-300">${formatBytes(f.total_size)}</td>
+            <td class="py-3 px-4">
+              <span class="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-teal-300 font-bold">
+                ${f.num_blocks} blocks (${formatBytes(f.block_size)} ea)
+              </span>
+            </td>
+            <td class="py-3 px-4">
+              ${f.is_encrypted ? 
+                `<span class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[11px] inline-flex items-center space-x-1">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                  <span>AES-256-GCM</span>
+                </span>` : 
+                `<span class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 text-[11px]">Plaintext</span>`
+              }
+            </td>
+            <td class="py-3 px-4 text-slate-400 text-[11px]" title="${f.checksum}">
+              ${f.checksum.substring(0, 12)}...
+            </td>
+            <td class="py-3 px-4 text-slate-300">${f.uploader}</td>
+            <td class="py-3 px-4 text-right space-x-2">
+              <button onclick="downloadFile('${f.id}', '${f.filename}')" class="text-teal-400 hover:text-teal-300 font-medium" title="Reassemble & Download">Download</button>
+              <button onclick="inspectBlocks('${f.id}', '${f.filename}')" class="text-cyan-400 hover:text-cyan-300 font-medium" title="Inspect Blocks">Blocks</button>
+              <button onclick="openPublishModal('${f.id}')" class="text-amber-400 hover:text-amber-300 font-medium" title="Publish to S3/GCS CDN">Publish</button>
+              <button onclick="deleteFile('${f.id}', '${f.filename}')" class="text-rose-400 hover:text-rose-300 font-medium" title="Delete">Delete</button>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    // Upload File
+    async function handleUpload(e) {
+      e.preventDefault();
+      const fileInput = document.getElementById('fileInput');
+      const blockSize = document.getElementById('blockSizeSelect').value;
+      const encrypt = document.getElementById('encryptCheckbox').checked;
+      const statusDiv = document.getElementById('uploadStatusMsg');
+      const uploadBtn = document.getElementById('uploadBtn');
+
+      if (!fileInput.files[0]) return;
+
+      const formData = new FormData();
+      formData.append('file', fileInput.files[0]);
+      formData.append('block_size', blockSize);
+      formData.append('encrypt', encrypt);
+
+      uploadBtn.disabled = true;
+      uploadBtn.innerText = "Segmenting & Distributing Blocks...";
+      statusDiv.className = "mt-3 p-3 rounded-lg text-xs font-medium bg-slate-800 text-teal-300 border border-teal-500/30";
+      statusDiv.innerText = "Encrypting blocks with AES-256-GCM and distributing across HDFS DataNodes...";
+      statusDiv.classList.remove('hidden');
+
+      try {
+        const res = await authFetch('/api/v1/files/upload', {
+          method: 'POST',
+          body: formData
+        });
+        const result = await res.json();
+
+        if (!res.ok) {
+          throw new Error(result.detail || 'Upload failed');
+        }
+
+        statusDiv.className = "mt-3 p-3 rounded-lg text-xs font-medium bg-emerald-950/80 text-emerald-300 border border-emerald-500/30";
+        statusDiv.innerText = `Success! File "${result.filename}" (${formatBytes(result.size_bytes)}) divided into ${result.num_blocks} blocks and stored with 2x replication across HDFS DataNodes.`;
+        fileInput.value = "";
+        await initDashboard();
+      } catch (err) {
+        statusDiv.className = "mt-3 p-3 rounded-lg text-xs font-medium bg-rose-950/80 text-rose-300 border border-rose-500/30";
+        statusDiv.innerText = `Upload Error: ${err.message}`;
+      } finally {
+        uploadBtn.disabled = false;
+        uploadBtn.innerText = "Segment & Upload";
+      }
+    }
+
+    // Download File
+    async function downloadFile(fileId, filename) {
+      try {
+        const res = await authFetch(`/api/v1/files/${fileId}/download`);
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || 'Download failed');
+        }
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        a.remove();
+      } catch (err) {
+        alert('Download Error: ' + err.message);
+      }
+    }
+
+    // Delete File
+    async function deleteFile(fileId, filename) {
+      if (!confirm(`Delete "${filename}" and purge all distributed HDFS replicas?`)) return;
+      try {
+        const res = await authFetch(`/api/v1/files/${fileId}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Delete failed');
+        await initDashboard();
+      } catch (err) {
+        alert('Delete Error: ' + err.message);
+      }
+    }
+
+    // Inspect Blocks
+    async function inspectBlocks(fileId, filename) {
+      try {
+        const res = await authFetch(`/api/v1/files/${fileId}/blocks`);
+        const data = await res.json();
+        
+        document.getElementById('modalFileTitle').innerText = `Segments for: ${filename}`;
+        document.getElementById('modalFileSubtitle').innerText = `${data.num_blocks} blocks • Block size: ${formatBytes(data.block_size)} • Total: ${formatBytes(data.total_size)}`;
+
+        const tbody = document.getElementById('modalBlocksTableBody');
+        tbody.innerHTML = '';
+
+        data.blocks.forEach(b => {
+          const tr = document.createElement('tr');
+          tr.className = "hover:bg-slate-800/40";
+          tr.innerHTML = `
+            <td class="py-2.5 px-3 text-slate-400">${b.block_index}</td>
+            <td class="py-2.5 px-3 font-semibold text-teal-300">${b.block_id}</td>
+            <td class="py-2.5 px-3 text-slate-300">${formatBytes(b.raw_size)}</td>
+            <td class="py-2.5 px-3">
+              <span class="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px]">AES-GCM</span>
+            </td>
+            <td class="py-2.5 px-3 text-slate-400 text-[10px]" title="${b.checksum_sha256}">
+              ${b.checksum_sha256.substring(0, 16)}...
+            </td>
+            <td class="py-2.5 px-3">
+              <div class="flex space-x-1">
+                ${b.replica_nodes.map(n => `<span class="px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 text-[10px]">${n}</span>`).join('')}
+              </div>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        document.getElementById('blockModal').classList.remove('hidden');
+      } catch (err) {
+        alert('Failed to inspect blocks: ' + err.message);
+      }
+    }
+
+    function closeBlockModal() {
+      document.getElementById('blockModal').classList.add('hidden');
+    }
+
+    // HDFS Cluster Status
+    async function loadClusterStatus() {
+      try {
+        const res = await authFetch('/api/v1/cluster/status');
+        const cluster = await res.json();
+        
+        document.getElementById('clusterStatusText').innerText = cluster.cluster_status;
+        document.getElementById('clusterTotalNodes').innerText = `${cluster.online_nodes}/${cluster.total_nodes}`;
+
+        const container = document.getElementById('datanodesContainer');
+        container.innerHTML = '';
+
+        cluster.datanodes.forEach(dn => {
+          const card = document.createElement('div');
+          card.className = `p-4 rounded-xl border ${dn.is_online ? 'border-slate-800 bg-slate-900/80' : 'border-rose-900/60 bg-rose-950/20'} flex flex-col justify-between space-y-3`;
+          card.innerHTML = `
+            <div>
+              <div class="flex justify-between items-center mb-1">
+                <span class="font-bold text-sm text-slate-200">${dn.node_id}</span>
+                <span class="px-2 py-0.5 text-[10px] rounded-full font-bold ${dn.is_online ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' : 'bg-rose-500/20 text-rose-400 border border-rose-500/40'}">
+                  ${dn.is_online ? 'ONLINE' : 'OFFLINE'}
+                </span>
+              </div>
+              <div class="text-slate-400 text-xs">${dn.rack} • LAN: ${dn.host}</div>
+            </div>
+
+            <div>
+              <div class="flex justify-between text-[11px] text-slate-400 mb-1">
+                <span>Storage Used</span>
+                <span>${formatBytes(dn.used_bytes)} / ${formatBytes(dn.capacity_bytes)} (${dn.usage_pct}%)</span>
+              </div>
+              <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                <div class="bg-teal-500 h-1.5 rounded-full" style="width: ${Math.min(100, dn.usage_pct)}%"></div>
+              </div>
+            </div>
+
+            <div class="flex justify-between items-center pt-2 border-t border-slate-800 text-[11px]">
+              <span class="text-slate-400">${dn.block_count} block replicas</span>
+              <button onclick="toggleNode('${dn.node_id}', ${!dn.is_online})" class="px-2.5 py-1 rounded text-xs font-semibold ${dn.is_online ? 'bg-rose-950/60 text-rose-300 hover:bg-rose-900 border border-rose-800' : 'bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900 border border-emerald-800'} transition">
+                ${dn.is_online ? 'Simulate Failure' : 'Recover Node'}
+              </button>
+            </div>
+          `;
+          container.appendChild(card);
+        });
+
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function toggleNode(nodeId, online) {
+      try {
+        const res = await authFetch(`/api/v1/cluster/nodes/${nodeId}/toggle`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ online })
+        });
+        if (!res.ok) throw new Error('Toggle failed');
+        await loadClusterStatus();
+      } catch (err) {
+        alert('Action failed: ' + err.message);
+      }
+    }
+
+    // Hybrid Cloud Publishing
+    function openPublishModal(fileId) {
+      document.getElementById('publishFileId').value = fileId;
+      document.getElementById('publishModal').classList.remove('hidden');
+    }
+
+    function closePublishModal() {
+      document.getElementById('publishModal').classList.add('hidden');
+    }
+
+    async function confirmPublish() {
+      const fileId = document.getElementById('publishFileId').value;
+      const provider = document.getElementById('publishProvider').value;
+      const btn = document.getElementById('confirmPublishBtn');
+
+      btn.disabled = true;
+      btn.innerText = "Publishing to Cloud...";
+
+      try {
+        const res = await authFetch('/api/v1/publish', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ file_id: fileId, provider })
+        });
+        if (!res.ok) throw new Error('Publishing failed');
+        const pub = await res.json();
+        closePublishModal();
+        setTab('hybrid');
+        await loadPublishedDocs();
+      } catch (err) {
+        alert('Publish error: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "Publish & Generate CDN";
+      }
+    }
+
+    async function loadPublishedDocs() {
+      try {
+        const res = await authFetch('/api/v1/published');
+        const data = await res.json();
+        const tbody = document.getElementById('publishedTableBody');
+        tbody.innerHTML = '';
+
+        if (!data.published_docs || data.published_docs.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-slate-500 font-sans">No published documents found.</td></tr>`;
+          return;
+        }
+
+        data.published_docs.forEach(p => {
+          const tr = document.createElement('tr');
+          tr.className = "hover:bg-slate-800/40";
+          tr.innerHTML = `
+            <td class="py-3 px-4 font-semibold text-slate-200">${p.filename}</td>
+            <td class="py-3 px-4">
+              <span class="px-2 py-0.5 rounded font-bold text-[10px] ${p.provider === 'S3' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-blue-500/20 text-blue-300 border border-blue-500/40'}">
+                ${p.provider}
+              </span>
+            </td>
+            <td class="py-3 px-4 text-slate-400 text-[11px]">${p.object_key}</td>
+            <td class="py-3 px-4 text-teal-400 text-[11px]">
+              <a href="${p.cdn_url}" target="_blank" class="hover:underline flex items-center space-x-1">
+                <span>${p.cdn_url}</span>
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+              </a>
+            </td>
+            <td class="py-3 px-4 text-right">
+              <a href="${p.cdn_url}" target="_blank" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-teal-300 rounded font-sans text-xs">View CDN</a>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    // Startup
+    window.addEventListener('DOMContentLoaded', initDashboard);
+  </script>
+
+</body>
+</html>

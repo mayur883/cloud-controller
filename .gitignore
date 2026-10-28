@@ -1,0 +1,21 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Local tokens and temporary files
+.labcloud_token.json
+restored_*
+*.log
+
+# Runtime generated data
+data/hdfs_datanodes/*/blocks/*
+!data/hdfs_datanodes/**/.gitkeep
+data/public_object_store/*/*
+!data/public_object_store/**/.gitkeep
+
+# Environment
+.env
+venv/
+.venv/
